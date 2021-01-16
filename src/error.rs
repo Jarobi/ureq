@@ -63,18 +63,17 @@ use crate::Response;
 /// ```
 ///
 /// If you'd like to treat all status code errors as normal, successful responses,
-/// you can use [Result::or_else](std::result::Result::or_else) like this:
+/// you can use [ErrorExt::into_response] like this:
 ///
 /// ```
 /// use ureq::Error::Status;
-/// # fn main() -> std::result::Result<(), ureq::Error> {
+/// # fn main() -> std::result::Result<(), ureq::Transport> {
 /// # ureq::is_test(true);
+/// use ureq::ErrorExt;
+///
 /// let resp = ureq::get("http://example.com/")
 ///   .call()
-///   .or_else(|e| match e {
-///     Status(_, r) => Ok(r), // turn status errors into Ok Responses.
-///     _ => Err(e),
-///   })?;
+///   .into_response()?;
 /// # Ok(())
 /// # }
 /// ```
@@ -96,6 +95,43 @@ pub struct Transport {
     url: Option<Url>,
     source: Option<Box<dyn error::Error + Send + Sync + 'static>>,
     response: Option<Response>,
+}
+
+/// Extensions to [`Error`].
+pub trait ErrorExt {
+    /// Ergonomic helper for handling all status codes as [`Response`].
+    ///
+    /// By default, ureq handles non-2xx responses as [`Error::Status`]. This
+    /// helper is for handling all responses as [`Response`], regardless
+    /// of status code.
+    ///
+    /// ```
+    /// # ureq::is_test(true);
+    /// # fn main() -> Result<(), ureq::Transport> {
+    /// // Bring trait into context.
+    /// use ureq::ErrorExt;
+    ///
+    /// let response = ureq::get("http://httpbin.org/status/500")
+    ///     .call()
+    ///     // Transport errors, such as DNS or connectivity problems
+    ///     // must still be dealt with as `Err`.
+    ///     .into_response()?;
+    ///
+    /// assert_eq!(response.status(), 500);
+    /// # Ok(())
+    /// # }
+    /// ```
+    fn into_response(self) -> Result<Response, Transport>;
+}
+
+impl ErrorExt for Result<Response, Error> {
+    fn into_response(self) -> Result<Response, Transport> {
+        match self {
+            Ok(response) => Ok(response),
+            Err(Error::Status(_, response)) => Ok(response),
+            Err(Error::Transport(transport)) => Err(transport),
+        }
+    }
 }
 
 impl Display for Error {
